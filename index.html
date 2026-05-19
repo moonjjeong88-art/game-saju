@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>운명의 바위 — 사주 파괴 클리커</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app">
+    <header class="hud">
+      <div class="hud-label">총 의지 포인트</div>
+      <div class="hud-value" id="willpower-display">0</div>
+      <div class="hud-sub">
+        <span id="dps-display">0</span>/초 · 목표 <span id="goal-display">100</span>
+      </div>
+    </header>
+
+    <main class="game-area">
+      <div class="rock-container" id="rock-container">
+        <div class="rock-wrapper" id="rock-wrapper">
+          <svg class="rock-svg" id="rock-svg" viewBox="0 0 200 180" aria-label="운명의 바위">
+            <defs>
+              <filter id="rock-glow" x="-50%" y="-50%" width="200%" height="200%">
+                <feDropShadow dx="0" dy="0" stdDeviation="4" flood-color="#00ffff" flood-opacity="0.9"/>
+                <feDropShadow dx="0" dy="0" stdDeviation="10" flood-color="#00ffff" flood-opacity="0.5"/>
+              </filter>
+            </defs>
+            <polygon
+              id="rock-polygon"
+              class="rock-body"
+              points="100,15 165,45 185,95 160,155 95,170 40,140 20,85 55,35"
+            />
+          </svg>
+          <div class="rock-labels" id="rock-labels"></div>
+        </div>
+        <div class="shatter-layer" id="shatter-layer" aria-hidden="true"></div>
+      </div>
+    </main>
+
+    <section class="store" id="store">
+      <h2 class="store-title">의지 업그레이드 스토어</h2>
+      <div class="store-items">
+        <button type="button" class="store-item" id="upgrade-action" data-upgrade="action">
+          <span class="store-item-name">실행력 강화</span>
+          <span class="store-item-desc">1초당 +1 포인트</span>
+          <span class="store-item-cost">50 포인트</span>
+          <span class="store-item-owned" id="owned-action">보유 0</span>
+        </button>
+        <button type="button" class="store-item" id="upgrade-ai" data-upgrade="ai">
+          <span class="store-item-name">AI 활용 능력</span>
+          <span class="store-item-desc">1초당 +5 포인트</span>
+          <span class="store-item-cost">200 포인트</span>
+          <span class="store-item-owned" id="owned-ai">보유 0</span>
+        </button>
+      </div>
+    </section>
+  </div>
+
+  <div class="popup-overlay hidden" id="popup-overlay">
+    <div class="popup">
+      <div class="popup-icon">✦</div>
+      <p class="popup-text" id="popup-text"></p>
+      <button type="button" class="popup-btn" id="popup-next">다음 운명 깨러 가기</button>
+    </div>
+  </div>
+
+  <script src="game.js"></script>
+</body>
+</html>
