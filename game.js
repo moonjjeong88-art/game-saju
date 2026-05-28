@@ -27,6 +27,29 @@
     ai: { name: "AI 활용 능력", cost: 200, dps: 5 },
   };
 
+  // Balance tuning table: tweak only these values.
+  const BALANCE = {
+    normalTapPoint: 1,
+    feverGaugeMax: 100,
+    feverGaugeGainPerTap: 8,
+    feverDurationSec: 5,
+    feverBaseTapPoint: 10,
+    feverJackpotTapPoint: 100,
+    feverJackpotChance: 0.2,
+  };
+  const BALANCE_DEFAULTS = { ...BALANCE };
+  const BALANCE_STORAGE_KEY = "sajugame.balance.v1";
+
+  const BALANCE_META = {
+    normalTapPoint: { label: "평상시 터치 점수", min: 1, max: 999, step: 1 },
+    feverGaugeMax: { label: "피버 게이지 최대치", min: 10, max: 999, step: 1 },
+    feverGaugeGainPerTap: { label: "터치당 게이지 증가", min: 1, max: 100, step: 1 },
+    feverDurationSec: { label: "피버 지속시간(초)", min: 1, max: 30, step: 0.1 },
+    feverBaseTapPoint: { label: "피버 기본 터치 점수", min: 1, max: 9999, step: 1 },
+    feverJackpotTapPoint: { label: "피버 잭팟 점수", min: 1, max: 99999, step: 1 },
+    feverJackpotChance: { label: "피버 잭팟 확률(0~1)", min: 0, max: 1, step: 0.01 },
+  };
+
   const state = {
     willpower: 0,
     stageIndex: 0,
@@ -36,6 +59,9 @@
     clearing: false,
     autoTick: 0,
     lastTick: 0,
+    feverGauge: 0,
+    feverActive: false,
+    feverEndAt: 0,
   };
 
   const $ = (id) => document.getElementById(id);
@@ -55,7 +81,20 @@
     upgradeAi: $("upgrade-ai"),
     ownedAction: $("owned-action"),
     ownedAi: $("owned-ai"),
+    feverFill: $("fever-fill"),
+    feverPercent: $("fever-percent"),
+    feverBanner: $("fever-banner"),
+    feverTimer: $("fever-timer"),
+    feverFlash: $("fever-flash"),
+    devToggle: $("dev-toggle"),
+    devPanel: $("dev-panel"),
+    devGrid: $("dev-grid"),
+    devResetBtn: $("dev-reset-btn"),
+    devClearBtn: $("dev-clear-btn"),
   };
+
+  let audioCtx = null;
+  let bgmTimer = 0;
 
   function currentStage() {
     return STAGES[Math.min(state.stageIndex, STAGES.length - 1)];
@@ -73,6 +112,13 @@
     els.willpower.textContent = formatNum(state.willpower);
     els.dps.textContent = formatNum(state.dps);
     els.goal.textContent = formatNum(stageGoal());
+    const gaugePct = Math.max(0, Math.min(100, (state.feverGauge / BALANCE.feverGaugeMax) * 100));
+    els.feverFill.style.width = `${gaugePct}%`;
+    els.feverPercent.textContent = Math.floor(gaugePct);
+    if (state.feverActive) {
+      const remain = Math.max(0, (state.feverEndAt - performance.now()) / 1000);
+      els.feverTimer.textContent = remain.toFixed(1);
+    }
     updateStoreButtons();
   }
 
@@ -85,6 +131,137 @@
     }
     els.ownedAction.textContent = `보유 ${state.owned.action}`;
     els.ownedAi.textContent = `보유 ${state.owned.ai}`;
+  }
+
+  function clamp(value, min, max) {
+    return Math.max(min, Math.min(max, value));
+  }
+
+  function sanitizeBalanceValue(key, rawValue) {
+    const meta = BALANCE_META[key];
+    if (!meta) return null;
+    const parsed = Number(rawValue);
+    if (Number.isNaN(parsed)) return null;
+    const clamped = clamp(parsed, meta.min, meta.max);
+    return meta.step < 1 ? Number(clamped.toFixed(2)) : Math.round(clamped);
+  }
+
+  function saveBalanceToStorage() {
+    try {
+      window.localStorage.setItem(BALANCE_STORAGE_KEY, JSON.stringify(BALANCE));
+    } catch (_) {
+      // Ignore storage failures (private mode / quota issues).
+    }
+  }
+
+  function clearBalanceStorage() {
+    try {
+      window.localStorage.removeItem(BALANCE_STORAGE_KEY);
+    } catch (_) {
+      // Ignore storage failures.
+    }
+  }
+
+  function loadBalanceFromStorage() {
+    try {
+      const raw = window.localStorage.getItem(BALANCE_STORAGE_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== "object") return;
+
+      for (const key of Object.keys(BALANCE_META)) {
+        if (!(key in parsed)) continue;
+        const sanitized = sanitizeBalanceValue(key, parsed[key]);
+        if (sanitized != null) {
+          BALANCE[key] = sanitized;
+        }
+      }
+    } catch (_) {
+      // Ignore malformed JSON or localStorage errors.
+    }
+  }
+
+  function renderDevPanel() {
+    els.devGrid.innerHTML = "";
+    for (const [key, meta] of Object.entries(BALANCE_META)) {
+      const label = document.createElement("label");
+      label.className = "dev-label";
+      label.setAttribute("for", `balance-${key}`);
+      label.textContent = meta.label;
+
+      const input = document.createElement("input");
+      input.className = "dev-input";
+      input.id = `balance-${key}`;
+      input.type = "number";
+      input.min = String(meta.min);
+      input.max = String(meta.max);
+      input.step = String(meta.step);
+      input.value = String(BALANCE[key]);
+      input.dataset.key = key;
+      input.addEventListener("input", onBalanceInput);
+
+      els.devGrid.appendChild(label);
+      els.devGrid.appendChild(input);
+    }
+  }
+
+  function syncDevPanelValues() {
+    const inputs = els.devGrid.querySelectorAll("input[data-key]");
+    for (const input of inputs) {
+      const key = input.dataset.key;
+      input.value = String(BALANCE[key]);
+    }
+  }
+
+  function onBalanceInput(e) {
+    const input = e.target;
+    const key = input.dataset.key;
+    const meta = BALANCE_META[key];
+    if (!meta) return;
+
+    const sanitized = sanitizeBalanceValue(key, input.value);
+    if (sanitized == null) return;
+    BALANCE[key] = sanitized;
+
+    if (key === "feverGaugeMax") {
+      state.feverGauge = Math.min(state.feverGauge, BALANCE.feverGaugeMax);
+    }
+    if (key === "feverDurationSec" && state.feverActive) {
+      const remain = Math.max(0, state.feverEndAt - performance.now());
+      state.feverEndAt = performance.now() + Math.min(remain, BALANCE.feverDurationSec * 1000);
+    }
+
+    syncDevPanelValues();
+    saveBalanceToStorage();
+    updateHUD();
+  }
+
+  function toggleDevPanel() {
+    const isHidden = els.devPanel.classList.toggle("hidden");
+    els.devToggle.setAttribute("aria-expanded", String(!isHidden));
+    els.devToggle.textContent = isHidden ? "개발자 밸런스" : "패널 닫기";
+  }
+
+  function resetBalanceDefaults() {
+    Object.assign(BALANCE, BALANCE_DEFAULTS);
+    state.feverGauge = Math.min(state.feverGauge, BALANCE.feverGaugeMax);
+    if (state.feverActive) {
+      state.feverEndAt = performance.now() + BALANCE.feverDurationSec * 1000;
+    }
+    syncDevPanelValues();
+    saveBalanceToStorage();
+    updateHUD();
+  }
+
+  function clearSavedBalanceAndReset() {
+    clearBalanceStorage();
+    Object.assign(BALANCE, BALANCE_DEFAULTS);
+    state.feverGauge = Math.min(state.feverGauge, BALANCE.feverGaugeMax);
+    if (state.feverActive) {
+      state.feverEndAt = performance.now() + BALANCE.feverDurationSec * 1000;
+    }
+    syncDevPanelValues();
+    updateHUD();
   }
 
   function randomLabelPositions(labels) {
@@ -125,6 +302,82 @@
     w.classList.add("hit", "pulse", "shake");
     setTimeout(() => w.classList.remove("hit"), 150);
     setTimeout(() => w.classList.remove("pulse", "shake"), 280);
+    if (state.feverActive) {
+      w.classList.remove("fever-shake");
+      void w.offsetWidth;
+      w.classList.add("fever-shake");
+      setTimeout(() => w.classList.remove("fever-shake"), 180);
+    }
+  }
+
+  function ensureAudioContext() {
+    if (!audioCtx) {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (AC) audioCtx = new AC();
+    }
+    if (audioCtx && audioCtx.state === "suspended") {
+      audioCtx.resume().catch(() => {});
+    }
+  }
+
+  function playTone(freq, duration, type, volume) {
+    if (!audioCtx) return;
+    const now = audioCtx.currentTime;
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = type;
+    osc.frequency.setValueAtTime(freq, now);
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.exponentialRampToValueAtTime(volume, now + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
+    osc.connect(gain).connect(audioCtx.destination);
+    osc.start(now);
+    osc.stop(now + duration + 0.03);
+  }
+
+  function triggerScreenFlash() {
+    els.feverFlash.classList.remove("hidden");
+    void els.feverFlash.offsetWidth;
+    setTimeout(() => {
+      els.feverFlash.classList.add("hidden");
+    }, 420);
+  }
+
+  function spawnSparks(x, y) {
+    const count = state.feverActive ? 14 : 6;
+    for (let i = 0; i < count; i++) {
+      const s = document.createElement("div");
+      s.className = "spark";
+      s.style.left = `${x}px`;
+      s.style.top = `${y}px`;
+      const dist = (state.feverActive ? 100 : 55) * Math.random();
+      const angle = Math.random() * Math.PI * 2;
+      s.style.setProperty("--sx", `${Math.cos(angle) * dist}px`);
+      s.style.setProperty("--sy", `${Math.sin(angle) * dist}px`);
+      document.body.appendChild(s);
+      s.addEventListener("animationend", () => s.remove());
+    }
+  }
+
+  function startFeverMode() {
+    state.feverActive = true;
+    state.feverGauge = 0;
+    state.feverEndAt = performance.now() + BALANCE.feverDurationSec * 1000;
+    document.body.classList.add("fever-mode");
+    els.feverBanner.classList.remove("hidden");
+    triggerScreenFlash();
+    ensureAudioContext();
+    playTone(880, 0.24, "sawtooth", 0.08);
+    playTone(1174, 0.2, "triangle", 0.07);
+    updateHUD();
+  }
+
+  function endFeverMode() {
+    state.feverActive = false;
+    state.feverEndAt = 0;
+    document.body.classList.remove("fever-mode");
+    els.feverBanner.classList.add("hidden");
+    updateHUD();
   }
 
   function checkStageClear() {
@@ -154,8 +407,28 @@
     e.preventDefault();
 
     const point = e.touches ? e.touches[0] : e;
+    ensureAudioContext();
     playHitAnimation();
-    addWillpower(1, point.clientX, point.clientY);
+    const tapAmount = state.feverActive
+      ? (
+          Math.random() < BALANCE.feverJackpotChance
+            ? BALANCE.feverJackpotTapPoint
+            : BALANCE.feverBaseTapPoint
+        )
+      : BALANCE.normalTapPoint;
+    addWillpower(tapAmount, point.clientX, point.clientY);
+    spawnSparks(point.clientX, point.clientY);
+    if (state.feverActive) {
+      playTone(420 + Math.random() * 180, 0.08, "square", 0.03);
+    } else {
+      playTone(220 + Math.random() * 60, 0.06, "triangle", 0.018);
+      state.feverGauge = Math.min(BALANCE.feverGaugeMax, state.feverGauge + BALANCE.feverGaugeGainPerTap);
+      if (state.feverGauge >= BALANCE.feverGaugeMax) {
+        startFeverMode();
+      } else {
+        updateHUD();
+      }
+    }
   }
 
   function createShatterEffect() {
@@ -229,6 +502,7 @@
 
   function triggerStageClear() {
     state.clearing = true;
+    if (state.feverActive) endFeverMode();
     els.rockWrapper.classList.add("hidden");
     createShatterEffect();
     showPopup(currentStage().message);
@@ -266,6 +540,25 @@
     const delta = (timestamp - state.lastTick) / 1000;
     state.lastTick = timestamp;
 
+    if (state.feverActive && timestamp >= state.feverEndAt) {
+      endFeverMode();
+    }
+
+    if (audioCtx) {
+      bgmTimer += delta;
+      const bpm = state.feverActive ? 170 : 110;
+      const step = 60 / bpm;
+      if (bgmTimer >= step) {
+        bgmTimer -= step;
+        if (state.feverActive) {
+          playTone(220, 0.08, "sawtooth", 0.018);
+          playTone(330, 0.06, "triangle", 0.012);
+        } else {
+          playTone(165, 0.07, "sine", 0.008);
+        }
+      }
+    }
+
     if (state.dps > 0 && !state.clearing) {
       state.autoTick += delta * state.dps;
       const whole = Math.floor(state.autoTick);
@@ -282,7 +575,9 @@
   }
 
   function init() {
+    loadBalanceFromStorage();
     randomLabelPositions(STAGES[0].labels);
+    renderDevPanel();
     updateHUD();
 
     els.rockWrapper.addEventListener("pointerdown", onRockPointer);
@@ -290,6 +585,9 @@
 
     els.upgradeAction.addEventListener("click", () => buyUpgrade("action"));
     els.upgradeAi.addEventListener("click", () => buyUpgrade("ai"));
+    els.devToggle.addEventListener("click", toggleDevPanel);
+    els.devResetBtn.addEventListener("click", resetBalanceDefaults);
+    els.devClearBtn.addEventListener("click", clearSavedBalanceAndReset);
 
     requestAnimationFrame(gameLoop);
   }

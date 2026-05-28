@@ -8,6 +8,18 @@
 </head>
 <body>
   <div class="app">
+    <div class="fever-gauge" id="fever-gauge" aria-label="의지 게이지">
+      <div class="fever-gauge-title">의지 게이지</div>
+      <div class="fever-gauge-track">
+        <div class="fever-gauge-fill" id="fever-fill"></div>
+      </div>
+      <div class="fever-gauge-text"><span id="fever-percent">0</span>%</div>
+    </div>
+
+    <div class="fever-banner hidden" id="fever-banner">
+      <strong>의지 폭발!</strong> <span id="fever-timer">5.0</span>s
+    </div>
+
     <header class="hud">
       <div class="hud-label">총 의지 포인트</div>
       <div class="hud-value" id="willpower-display">0</div>
@@ -55,7 +67,20 @@
         </button>
       </div>
     </section>
+
+    <button type="button" class="dev-toggle" id="dev-toggle" aria-expanded="false">
+      개발자 밸런스
+    </button>
+
+    <section class="dev-panel hidden" id="dev-panel" aria-label="개발자 밸런스 패널">
+      <h3 class="dev-panel-title">피버 밸런스 실시간 튜닝</h3>
+      <div class="dev-grid" id="dev-grid"></div>
+      <button type="button" class="dev-reset-btn" id="dev-reset-btn">기본값으로 복원</button>
+      <button type="button" class="dev-clear-btn" id="dev-clear-btn">저장값 완전 삭제</button>
+    </section>
   </div>
+
+  <div class="fever-flash hidden" id="fever-flash" aria-hidden="true"></div>
 
   <div class="popup-overlay hidden" id="popup-overlay">
     <div class="popup">
