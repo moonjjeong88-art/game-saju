@@ -5,18 +5,24 @@
   {
     goal: 100,
     labels: ["가난", "야근", "불행", "한숨", "빚", "스트레스", "우울", "실패"],
+    mission: "두려움을 깨고 주말 아침, 집 근처 낮은 산 정상에 오른다.",
+    unlock: "첫 등산 성공",
     message:
       "방금 당신은 터치 100번으로 정해진 운명을 박살 냈습니다. 거봐요, 사주 따윈 믿을 게 못 된다니까요?",
   },
   {
     goal: 200,
     labels: ["외로움", "실패", "후회", "배신", "낙오", "한계", "의심", "포기"],
+    mission: "외로움을 깨고 동네 수영장에 등록해 물에 뜨는 법을 배운다.",
+    unlock: "수영 첫 25m 완주",
     message:
       "두 번째 운명도 산산조각! 당신의 의지는 이미 사주판을 뛰어넘었습니다. 계속 나아가세요.",
   },
   {
     goal: 400,
     labels: ["절망", "패배", "고립", "무기력", "두려움", "침체", "막다른길", "운명"],
+    mission: "실패 공포를 깨고 미뤄둔 지원서/포트폴리오를 끝내 제출한다.",
+    unlock: "도전 실행 완료",
     message:
       "세 번째 바위까지 부숴버렸군요. 이제 운명은 당신을 따라오는 존재가 되었습니다.",
   },
@@ -39,6 +45,7 @@
   };
   const BALANCE_DEFAULTS = { ...BALANCE };
   const BALANCE_STORAGE_KEY = "sajugame.balance.v1";
+  const UNLOCKS_STORAGE_KEY = "sajugame.unlocks.v1";
 
   const BALANCE_META = {
     normalTapPoint: { label: "평상시 터치 점수", min: 1, max: 999, step: 1 },
@@ -53,6 +60,7 @@
   const state = {
     willpower: 0,
     stageIndex: 0,
+    stageStartWillpower: 0,
     highestWillpower: 0,
     dps: 0,
     owned: { action: 0, ai: 0 },
@@ -62,6 +70,7 @@
     feverGauge: 0,
     feverActive: false,
     feverEndAt: 0,
+    completedUnlocks: [],
   };
 
   const $ = (id) => document.getElementById(id);
@@ -91,13 +100,27 @@
     devGrid: $("dev-grid"),
     devResetBtn: $("dev-reset-btn"),
     devClearBtn: $("dev-clear-btn"),
+    missionText: $("mission-text"),
+    missionLog: $("mission-log"),
   };
 
   let audioCtx = null;
   let bgmTimer = 0;
 
   function currentStage() {
-    return STAGES[Math.min(state.stageIndex, STAGES.length - 1)];
+    if (state.stageIndex < STAGES.length) {
+      return STAGES[state.stageIndex];
+    }
+
+    const base = STAGES[STAGES.length - 1];
+    const extraIndex = state.stageIndex - (STAGES.length - 1);
+    return {
+      goal: base.goal + extraIndex * 200,
+      labels: base.labels,
+      mission: "새로운 두려움을 깨고, 오늘 미룬 한 가지 행동을 즉시 실행한다.",
+      unlock: `실행 배지 ${state.stageIndex + 1}`,
+      message: `${state.stageIndex + 1}번째 운명까지 파괴했습니다. 이제 당신이 운명을 설계하는 단계입니다.`,
+    };
   }
 
   function stageGoal() {
@@ -119,7 +142,26 @@
       const remain = Math.max(0, (state.feverEndAt - performance.now()) / 1000);
       els.feverTimer.textContent = remain.toFixed(1);
     }
+    const stage = currentStage();
+    els.missionText.textContent = stage.mission;
     updateStoreButtons();
+  }
+
+  function renderMissionLog() {
+    els.missionLog.innerHTML = "";
+    if (state.completedUnlocks.length === 0) {
+      const empty = document.createElement("span");
+      empty.className = "dev-label";
+      empty.textContent = "아직 해방 기록이 없습니다.";
+      els.missionLog.appendChild(empty);
+      return;
+    }
+    for (const item of state.completedUnlocks) {
+      const chip = document.createElement("span");
+      chip.className = "mission-chip";
+      chip.textContent = item;
+      els.missionLog.appendChild(chip);
+    }
   }
 
   function updateStoreButtons() {
@@ -159,6 +201,26 @@
       window.localStorage.removeItem(BALANCE_STORAGE_KEY);
     } catch (_) {
       // Ignore storage failures.
+    }
+  }
+
+  function saveUnlocksToStorage() {
+    try {
+      window.localStorage.setItem(UNLOCKS_STORAGE_KEY, JSON.stringify(state.completedUnlocks));
+    } catch (_) {
+      // Ignore storage failures.
+    }
+  }
+
+  function loadUnlocksFromStorage() {
+    try {
+      const raw = window.localStorage.getItem(UNLOCKS_STORAGE_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) return;
+      state.completedUnlocks = parsed.filter((item) => typeof item === "string");
+    } catch (_) {
+      // Ignore malformed JSON or localStorage errors.
     }
   }
 
@@ -382,7 +444,8 @@
 
   function checkStageClear() {
     if (state.clearing) return;
-    if (state.highestWillpower >= stageGoal()) {
+    const gainedThisStage = state.highestWillpower - state.stageStartWillpower;
+    if (gainedThisStage >= stageGoal()) {
       triggerStageClear();
     }
   }
@@ -503,14 +566,22 @@
   function triggerStageClear() {
     state.clearing = true;
     if (state.feverActive) endFeverMode();
+    const unlock = currentStage().unlock;
+    if (unlock) {
+      state.completedUnlocks.push(unlock);
+      saveUnlocksToStorage();
+      renderMissionLog();
+    }
     els.rockWrapper.classList.add("hidden");
     createShatterEffect();
-    showPopup(currentStage().message);
+    const clearMessage = `${currentStage().message}\n\n해방 결과: ${currentStage().mission}`;
+    showPopup(clearMessage);
   }
 
   function startNextStage() {
     hidePopup();
     state.stageIndex++;
+    state.stageStartWillpower = state.highestWillpower;
     state.clearing = false;
 
     const stage = currentStage();
@@ -576,8 +647,10 @@
 
   function init() {
     loadBalanceFromStorage();
+    loadUnlocksFromStorage();
     randomLabelPositions(STAGES[0].labels);
     renderDevPanel();
+    renderMissionLog();
     updateHUD();
 
     els.rockWrapper.addEventListener("pointerdown", onRockPointer);

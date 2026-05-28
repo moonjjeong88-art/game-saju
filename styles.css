@@ -256,6 +256,45 @@ body {
   min-height: 0;
 }
 
+.mission-board {
+  margin: 0.15rem 1rem 0.5rem;
+  padding: 0.55rem 0.65rem;
+  border: 1px solid rgba(0, 255, 255, 0.2);
+  border-radius: 10px;
+  background: rgba(7, 14, 28, 0.65);
+}
+
+.mission-title,
+.mission-log-title {
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
+  color: #9edcff;
+}
+
+.mission-text {
+  margin-top: 0.22rem;
+  margin-bottom: 0.5rem;
+  color: #f6f7fb;
+  font-size: 0.79rem;
+  line-height: 1.4;
+}
+
+.mission-log {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  min-height: 1.6rem;
+}
+
+.mission-chip {
+  font-size: 0.66rem;
+  padding: 0.18rem 0.4rem;
+  border-radius: 999px;
+  color: #0c0f17;
+  background: linear-gradient(120deg, #00ffff, #7fffd4);
+  font-weight: 700;
+}
+
 .rock-container {
   position: relative;
   width: min(72vw, 280px);
